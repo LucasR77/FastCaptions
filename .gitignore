@@ -1,0 +1,30 @@
+# Python core
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+
+# PyInstaller
+build/
+dist/
+*.spec
+
+# Logs & config
+*.log
+session_sub.json
+presets_sub.json
+
+# User temporary files
+*.mp4
+*.txt
+*.ass
+temp_audio.wav
+proxy_*.mp4
+
+# IDEs
+.vscode/
+.idea/
