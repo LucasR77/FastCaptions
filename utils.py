@@ -4,12 +4,23 @@ import subprocess
 import json
 
 def resource_path(relative_path):
-    """ Obtiene la ruta absoluta para recursos empaquetados """
+    """ Obtiene la ruta absoluta para recursos empaquetados o busca en el sistema """
     try:
         base_path = sys._MEIPASS
+        return os.path.join(base_path, relative_path)
     except Exception:
-        base_path = os.path.abspath(".")
-    return os.path.join(base_path, relative_path)
+        # 1. Buscar en el directorio actual
+        local_path = os.path.abspath(relative_path)
+        if os.path.exists(local_path):
+            return local_path
+            
+        # 2. Buscar en la carpeta interna de la build (por si el usuario lo tiene ahí)
+        internal_path = os.path.join(os.path.dirname(__file__), "dist", "FastCaptions", "_internal", relative_path)
+        if os.path.exists(internal_path):
+            return internal_path
+            
+        # 3. Fallback al PATH del sistema para binarios
+        return relative_path
 
 def get_duration(file):
     ffprobe = resource_path("ffprobe.exe")

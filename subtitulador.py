@@ -62,9 +62,9 @@ class SubtituladorApp:
         self.path_vid_orig = ""
         self.path_proxy = "" # Para preview fluido
         self.path_txt_corr = ""
-        # Con Alignment 2, MarginV es distancia desde ABAJO
-        # 300 = 300px desde el fondo (posición típica de subtítulos)
-        self.margin_v = session.get("margin_v", 300)
+        # Con Alignment 8 (Top), MarginV es distancia desde ARRIBA.
+        # 1600 = cerca del fondo en un lienzo de 1920px de alto.
+        self.margin_v = session.get("margin_v", 1600)
         
         # Configuración Cargada o por defecto
         self.color_primario = session.get("color_p", "#FFFFFF")
@@ -88,13 +88,19 @@ class SubtituladorApp:
         self.setup_ui()
 
     def auto_guardar(self):
+        # Si el preview está abierto, usar su margen actual
+        margin_v_to_save = self.margin_v
+        if self.preview_active and self.preview_active.p_root.winfo_exists():
+            margin_v_to_save = self.preview_active.global_margin
+            self.margin_v = margin_v_to_save
+
         datos = {
             "color_p": self.color_primario,
             "color_b": self.color_borde,
             "color_s": self.color_secundario,
             "size": self.font_size.get(),
             "border": self.border_width.get(),
-            "margin_v": self.margin_v,
+            "margin_v": margin_v_to_save,
             "estilo": self.get_estilo_val()
         }
         guardar_session(datos)
@@ -419,9 +425,15 @@ class SubtituladorApp:
         if not self.path_vid_orig or not self.path_txt_corr:
             return
             
-        # Ya no preguntamos ni abrimos preview, usamos el margin_v guardado
+        # Sincronizar el margen si el preview está abierto
+        margin_v_final = self.margin_v
+        if self.preview_active and self.preview_active.p_root.winfo_exists():
+            margin_v_final = self.preview_active.global_margin
+            self.margin_v = margin_v_final
+            self.auto_guardar()
+
         self.btn_render.config(state="disabled")
-        threading.Thread(target=self.proceso_render, args=(self.margin_v,), daemon=True).start()
+        threading.Thread(target=self.proceso_render, args=(margin_v_final,), daemon=True).start()
 
     def proceso_render(self, margin_v):
         try:

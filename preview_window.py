@@ -580,12 +580,12 @@ class PreviewWindow:
             f_size = self.font_size_var.get()
             b_width = self.border_width_var.get()
 
-            # Ajuste de escala más preciso (libass vs tkinter)
-            # 1080x1920 -> 270x480 (Factor 0.25)
-            # Pero libass renderiza más pequeño, usamos 0.15 para compensar
-            tk_font_size = max(8, int(f_size * 0.15))
-            tk_border = max(1, int(b_width * 0.12))
-            font_style = ("Arial Black", tk_font_size, "bold")
+            # Relación de escala real: canvas_h / PlayResY (498 / 1920 ≈ 0.26)
+            scale_factor = self.canvas_h / 1920
+            tk_font_size = int(f_size * scale_factor)
+            tk_border = int(b_width * scale_factor)
+            # Usamos tamaño negativo en Tkinter para que sea en píxeles y no en puntos
+            font_style = ("Arial Black", -tk_font_size, "bold")
 
             # 1. Buscar si hay texto real para este tiempo
             display_text = "" 
@@ -641,9 +641,9 @@ class PreviewWindow:
                 temp_label.config(text=t)
                 return temp_label.winfo_reqwidth()
 
-            # Margen de seguridad en preview (270px de ancho total)
-            # 1080 -> 270 (Factor 0.25). 1000px ASS -> 250px Tk
-            max_w_px = int(self.canvas_w * 0.9)
+            # Margen de seguridad en preview sincronizado con el renderizador (1000 unidades ASS)
+            max_w_ass = 1000
+            max_w_px = int(max_w_ass * scale_factor)
             
             display_text_wrapped = wrap_text_pyramid(display_text, max_w_px, width_func_tk)
             lines = display_text_wrapped.split("\\N")
@@ -689,16 +689,16 @@ class PreviewWindow:
                     w = temp_label.winfo_reqwidth()
                     
                     # Borde
-                    offsets = []
-                    for dx in range(-tk_border, tk_border + 1):
-                        for dy in range(-tk_border, tk_border + 1):
-                            if dx != 0 or dy != 0:
-                                self.canvas.create_text(current_x + (w//2) + dx, current_y + dy, text=text, fill=color_b, 
-                                                   font=font_style, tags="text_item")
+                    if tk_border > 0:
+                        for dx in range(-tk_border, tk_border + 1):
+                            for dy in range(-tk_border, tk_border + 1):
+                                if dx != 0 or dy != 0:
+                                    self.canvas.create_text(current_x + dx, current_y + dy, text=text, fill=color_b, 
+                                                       font=font_style, tags="text_item", anchor="nw")
                     
                     # Texto
-                    self.canvas.create_text(current_x + (w//2), current_y, text=text, fill=color, 
-                                       font=font_style, tags="text_item")
+                    self.canvas.create_text(current_x, current_y, text=text, fill=color, 
+                                       font=font_style, tags="text_item", anchor="nw")
                     current_x += w
                     
             temp_label.destroy() # Cleanup
