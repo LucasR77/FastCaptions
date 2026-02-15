@@ -14,10 +14,15 @@ import time
 class PreviewWindow:
     def __init__(self, parent, video_path, estilo_var, color_p_getter, color_s_getter, color_b_getter, font_size_var, border_width_var, initial_margin, txt_path=None):
         self.p_root = tk.Toplevel(parent)
-        self.p_root.title("Subtitle Editor & Preview")
+        self.p_root.title("FastCaptions - Preview")
         self.p_root.geometry("900x750")  # A bit more space
         self.p_root.resizable(True, True)
         self.p_root.configure(bg="#0f172a")
+
+        try:
+            self.p_root.iconbitmap(resource_path("app_icon.ico"))
+        except:
+            pass
         
         # Modern Palette - Improved Contrast
         self.colors = {
@@ -55,15 +60,16 @@ class PreviewWindow:
         self.duration = get_duration(video_path)
         self.global_margin = initial_margin
         self.pos_y = tk.IntVar(value=initial_margin)
-        self.current_time = tk.DoubleVar(value=min(1.0, self.duration))
+        self.current_time = tk.DoubleVar(value=0.0)
         self.is_dragging = False
         self.individual_mode = False
+        self.editing_t_start = None # Para saber qué frase estamos ajustando exactamente
         
         self.canvas_w, self.canvas_h = 280, 498  # Más compacto para que quepa mejor verticalmente
         
         # Extraer AUDIO a WAV temporal
         self.audio_wav = os.path.join(os.environ.get("TEMP", "."), f"audio_{os.getpid()}.wav")
-        self.audio_initialized = self.prepare_audio()
+        threading.Thread(target=self.prepare_audio, daemon=True).start()
 
         self._last_after_id = None
         self.is_playing = False
@@ -305,25 +311,52 @@ class PreviewWindow:
              messagebox.showerror("Error Carga Editor", f"Error crítico cargando editor: {e}")
     
     def save_subtitles(self):
-        """Guarda los cambios del editor al archivo"""
+        """Guarda los cambios del editor al archivo PRESERVANDO las alturas individuales"""
         try:
+            # Primero, leer las alturas actuales del archivo para preservarlas
+            alturas_guardadas = {}
+            with open(self.txt_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        partes = line.split("#")
+                        if len(partes) >= 3:
+                            display_time = partes[0].strip()
+                            texto = partes[2].strip()
+                            if "{{" in texto:
+                                match = re.search(r"\{\{(\d+)\}\}", texto)
+                                if match:
+                                    alturas_guardadas[display_time] = match.group(0)
+                    except:
+                        continue
+            
+            # Ahora guardar con los textos editados pero preservando las alturas
             with open(self.txt_path, "w", encoding="utf-8") as f:
                 for idx, segment in enumerate(self.segments):
                     new_text = self.text_entries[idx].get().strip().upper()
-                    line = f"{segment['display_time']} # {segment['word_timestamps']} # {new_text}"
-                    if segment["height"]:
-                        line += f" {segment['height']}"
+                    display_time = segment['display_time']
+                    
+                    # Limpiar cualquier marcador de altura del nuevo texto
+                    new_text = re.sub(r"\{\{\d+\}\}", "", new_text).strip()
+                    
+                    # Si había una altura guardada para esta línea, preservarla
+                    if display_time in alturas_guardadas:
+                        new_text += f" {alturas_guardadas[display_time]}"
+                    
+                    line = f"{display_time} # {segment['word_timestamps']} # {new_text}"
                     f.write(line + "\n")
             
             # Recargar líneas
             with open(self.txt_path, "r", encoding="utf-8") as f:
                 self.lines = f.readlines()
             
+            # Recargar también los segmentos para actualizar el indicador 🎯
+            self.load_editor_content()
+            
             self.update_text_ui()
             
             # Feedback visual
             self.p_root.title("✅ CAMBIOS GUARDADOS")
-            self.p_root.after(1500, lambda: self.p_root.title("Editor de Subtítulos - Preview") 
+            self.p_root.after(1500, lambda: self.p_root.title("FastCaptions - Preview") 
                              if self.p_root.winfo_exists() else None)
             
         except Exception as e:
@@ -347,12 +380,19 @@ class PreviewWindow:
             ffmpeg = resource_path("ffmpeg.exe")
             # Extraer audio a WAV (44100Hz, mono) para máxima compatibilidad
             cmd = [ffmpeg, "-i", self.video_path, "-vn", "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "1", self.audio_wav, "-y"]
-            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            
+            startupinfo = None
+            if os.name == 'nt':
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            
+            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, startupinfo=startupinfo)
             
             if os.path.exists(self.audio_wav):
                 if not pygame.mixer.get_init():
                     pygame.mixer.init(frequency=44100, size=-16, channels=1)
                 pygame.mixer.music.load(self.audio_wav)
+                self.audio_initialized = True
                 return True
         except Exception as e:
             print(f"Error preparando audio: {e}")
@@ -415,7 +455,13 @@ class PreviewWindow:
         try:
             # -ss before -i is faster (input seeking)
             cmd = [ffmpeg, "-ss", ts, "-i", self.video_path, "-vframes", "1", "-f", "image2", "-q:v", "5", temp_frame, "-y"]
-            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            
+            startupinfo = None
+            if os.name == 'nt':
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            
+            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, startupinfo=startupinfo)
             
             if os.path.exists(temp_frame):
                 img = Image.open(temp_frame)
@@ -448,9 +494,22 @@ class PreviewWindow:
         self._last_after_id = self.p_root.after(100, lambda: threading.Thread(target=self.extraction_task, args=(self.current_time.get(),), daemon=True).start())
 
     def on_mouse_drag(self, e):
+        """
+        Maneja el arrastre del ratón para ajustar la altura del texto.
+        
+        Sistema de coordenadas:
+        - Canvas (Tkinter): 0 (arriba) -> canvas_h (abajo), típicamente 498px
+        - ASS (libass): MarginV con Alignment 8 = distancia desde ARRIBA
+          0 (arriba) -> 1920 (abajo) en un video vertical 1080x1920
+        
+        Conversión: ass_margin = (y_canvas / canvas_h) * 1920
+        Inversa: y_canvas = (ass_margin / 1920) * canvas_h
+        """
         self.is_dragging = True
         y = max(40, min(e.y, self.canvas_h - 40))
-        ass_margin = int((1 - (y / self.canvas_h)) * 1920)
+        
+        # Convertir coordenada Y del canvas a MarginV de ASS
+        ass_margin = int((y / self.canvas_h) * 1920)
         self.pos_y.set(ass_margin)
         
         if not self.individual_mode:
@@ -477,13 +536,20 @@ class PreviewWindow:
             # Buscamos si la frase actual ya tiene una altura para poner el slider ahí
             t_now = self.current_time.get()
             current_h = self.global_margin
+            self.editing_t_start = None
+            
             for line in self.lines:
                 try:
                     partes = line.split("#")
-                    t_data = partes[1].strip().split("|"); t_start = float(t_data[0].split(":")[0]); t_end = float(t_data[-1].split(":")[1])
-                    if t_start <= t_now <= t_end and "{{" in partes[2]:
-                        match = re.search(r"\{\{(\d+)\}\}", partes[2])
-                        if match: current_h = int(match.group(1))
+                    t_data = partes[1].strip().split("|")
+                    t_start = float(t_data[0].split(":")[0])
+                    t_end = float(t_data[-1].split(":")[1])
+                    if t_start <= t_now <= t_end:
+                        self.editing_t_start = t_start # Guardamos qué frase estamos editando
+                        if "{{" in partes[2]:
+                            match = re.search(r"\{\{\s*(\d+)\s*\}\}", partes[2])
+                            if match: current_h = int(match.group(1))
+                        break
                 except: pass
             
             self.pos_y.set(current_h)
@@ -494,6 +560,7 @@ class PreviewWindow:
             # Confirmar y salir
             self.guardar_posicion_frase()
             self.individual_mode = False
+            self.editing_t_start = None
             self.btn_individual.config(text="📌 AJUSTAR ALTURA DE ESTA FRASE", bg=self.colors["warning"])
             # Volver a mostrar la global en el slider
             self.pos_y.set(self.global_margin)
@@ -503,9 +570,6 @@ class PreviewWindow:
         if not self.p_root.winfo_exists(): return
         
         try:
-            if y_coord is None:
-                y_coord = int((1 - (self.pos_y.get() / 1920)) * self.canvas_h)
-            
             self.canvas.delete("text_item")
             is_animado = self.estilo_var.get() == "animado"
             x_center = self.canvas_w // 2
@@ -526,6 +590,7 @@ class PreviewWindow:
             # 1. Buscar si hay texto real para este tiempo
             display_text = "" 
             found_height = None
+            current_phrase_t_start = None
             
             t_now = self.current_time.get()
             
@@ -541,12 +606,13 @@ class PreviewWindow:
                         t_end = float(t_data[-1].split(":")[1])
                         
                         if t_start <= t_now <= t_end:
+                            current_phrase_t_start = t_start
                             display_text = partes[2].strip()
                             if "{{" in display_text:
-                                match = re.search(r"\{\{(\d+)\}\}", display_text)
+                                match = re.search(r"\{\{\s*(\d+)\s*\}\}", display_text)
                                 if match:
                                     found_height = int(match.group(1))
-                                    display_text = re.sub(r"\{\{\d+\}\}", "", display_text).strip()
+                                    display_text = re.sub(r"\{\{\s*\d+\s*\}\}", "", display_text).strip()
                             break
                     except Exception as e: 
                         print(f"Error parseando linea en update_text_ui: {e}")
@@ -555,17 +621,19 @@ class PreviewWindow:
                  display_text = "ESPERANDO TRANSCRIPCIÓN..."
 
             # 2. Determinar la altura a mostrar
-            if self.is_dragging or self.individual_mode:
-                # Usar valor de arrastre o modo edición
-                # (Si y_coord ya fue calculado arriba con pos_y, está bien)
-                if y_coord is None: # Should be handled at top, but just in case
-                     y_coord = int((1 - (self.pos_y.get() / 1920)) * self.canvas_h)
+            # Prioridad: arrastre activo > modo individual > altura guardada > global
+            if self.is_dragging:
+                 # Arrastre activo: usar la posición actual del slider
+                 y_coord = int((self.pos_y.get() / 1920) * self.canvas_h)
+            elif self.individual_mode and current_phrase_t_start == self.editing_t_start:
+                 # Modo individual: solo si estamos en la frase que se está editando
+                 y_coord = int((self.pos_y.get() / 1920) * self.canvas_h)
             elif found_height is not None:
-                # Mostrar la altura guardada
-                y_coord = int((1 - (found_height / 1920)) * self.canvas_h)
-            elif y_coord is None:
-                # Altura global (pos_y debería ser == global_margin cuando no editamos)
-                y_coord = int((1 - (self.pos_y.get() / 1920)) * self.canvas_h)
+                # Frase con altura individual guardada (marcada con {{altura}})
+                y_coord = int((found_height / 1920) * self.canvas_h)
+            else:
+                # Usar altura global por defecto
+                y_coord = int((self.global_margin / 1920) * self.canvas_h)
 
             # Función para medir ancho real en el preview
             temp_label = tk.Label(self.p_root, font=font_style)
@@ -660,7 +728,8 @@ class PreviewWindow:
         if not self.txt_path or not self.lines:
             return
         
-        t_now = self.current_time.get()
+        # Usar la frase que específicamente se marcó para editar, o en su defecto la actual
+        target_t = self.editing_t_start if self.editing_t_start is not None else self.current_time.get()
         nueva_altura = self.pos_y.get()  # Ya está en escala 1920
         
         for i, line in enumerate(self.lines):
@@ -670,8 +739,16 @@ class PreviewWindow:
                 t_start = float(t_data[0].split(":")[0])
                 t_end = float(t_data[-1].split(":")[1])
                 
-                if t_start <= t_now <= t_end:
-                    texto_limpio = re.sub(r"\{\{\d+\}\}", "", partes[2]).strip()
+                # Si tenemos editing_t_start, la coincidencia debe ser exacta al inicio
+                coincide = False
+                if self.editing_t_start is not None:
+                    coincide = (abs(t_start - self.editing_t_start) < 0.001)
+                else:
+                    coincide = (t_start <= target_t <= t_end)
+
+                if coincide:
+                    # Limpiar etiquetas de altura previas
+                    texto_limpio = re.sub(r"\{\{\s*\d+\s*\}\}", "", partes[2]).strip()
                     self.lines[i] = f"{partes[0]}# {partes[1]} # {texto_limpio} {{{{{nueva_altura}}}}}\n"
                     
                     # Guardar archivo
@@ -684,7 +761,7 @@ class PreviewWindow:
                     self.pos_y.set(self.global_margin)
                     self.update_text_ui()
                     
-                    self.p_root.after(1500, lambda: self.p_root.title("Editor de Subtítulos - Preview"))
+                    self.p_root.after(1500, lambda: self.p_root.title("FastCaptions - Preview"))
                     return
             except: 
                 continue

@@ -14,7 +14,14 @@ def resource_path(relative_path):
 def get_duration(file):
     ffprobe = resource_path("ffprobe.exe")
     cmd = [ffprobe, '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', file]
-    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    
+    # Prevenir que se abran consolas en Windows
+    startupinfo = None
+    if sys.platform == "win32":
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+
+    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, startupinfo=startupinfo)
     try:
         return float(result.stdout.strip())
     except:
@@ -63,7 +70,14 @@ def crear_proxy_video(input_video, output_proxy):
         "-c:a", "aac", "-b:a", "64k",  # Audio comprimido pero presente
         "-y", output_proxy
     ]
-    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    
+    # Prevenir que se abran consolas en Windows
+    startupinfo = None
+    if sys.platform == "win32":
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+
+    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, startupinfo=startupinfo)
 
 def guardar_session(datos):
     with open("session_sub.json", "w", encoding="utf-8") as f:

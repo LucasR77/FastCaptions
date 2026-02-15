@@ -1,30 +1,85 @@
-# Python core
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
-env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environments
 venv/
+.venv/
+env/
+.env/
 ENV/
+env.bak/
+venv.bak/
 
 # PyInstaller
+# We usually keep the .spec files for building, but ignore the output
+# *.spec
 build/
 dist/
-*.spec
 
-# Logs & config
-*.log
+# Project Specific Binaries (Large files)
+ffmpeg.exe
+ffplay.exe
+ffprobe.exe
+
+# Models (Heavy weight files)
+models/
+
+# Unit test / Coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
+
+# Temporary files and Output
+*.mp4
+*.MOV
+*.avi
+*.txt
+*.ass
+temp_render.ass
+proxy_*.mp4
+temp_audio.wav
+
+# Persistent Session Data
 session_sub.json
 presets_sub.json
 
-# User temporary files
-*.mp4
-*.txt
-*.ass
-temp_audio.wav
-proxy_*.mp4
-
-# IDEs
+# IDEs and Editors
 .vscode/
 .idea/
+*.swp
+*.swo
+.DS_Store
+
+# Installer releases
+release/

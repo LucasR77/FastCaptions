@@ -11,7 +11,7 @@ from faster_whisper import WhisperModel
 # Importes locales
 from utils import resource_path, get_duration, time_to_seconds, format_timestamp, rgb_to_ass, cargar_presets, guardar_preset, cargar_session, guardar_session, wrap_text_pyramid
 from preview_window import PreviewWindow
-from subtitle_editor import SubtitleEditor
+from subtitle_renderer import SubtitleRenderer
 
 # --- CONFIGURACIÓN ---
 WORDS_PER_GROUP = 4
@@ -19,10 +19,17 @@ WORDS_PER_GROUP = 4
 class SubtituladorApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Subtitulador Pro v4.0")
-        self.root.geometry("450x700+50+50") # Un poco más alta
+        self.root.title("FastCaptions")
+        # Altura fija razonable para monitores 1080p con escalado de Windows
+        self.root.geometry("450x650+50+50") 
         self.root.resizable(False, False)
         self.root.configure(bg="#0f172a")
+        
+        # Icono de la ventana
+        try:
+            self.root.iconbitmap(resource_path("app_icon.ico"))
+        except:
+            pass
         
         # Modern Palette - Improved Contrast
         self.colors = {
@@ -55,6 +62,8 @@ class SubtituladorApp:
         self.path_vid_orig = ""
         self.path_proxy = "" # Para preview fluido
         self.path_txt_corr = ""
+        # Con Alignment 2, MarginV es distancia desde ABAJO
+        # 300 = 300px desde el fondo (posición típica de subtítulos)
         self.margin_v = session.get("margin_v", 300)
         
         # Configuración Cargada o por defecto
@@ -86,22 +95,26 @@ class SubtituladorApp:
             "size": self.font_size.get(),
             "border": self.border_width.get(),
             "margin_v": self.margin_v,
-            "estilo": self.estilo.get()
+            "estilo": self.get_estilo_val()
         }
         guardar_session(datos)
 
+    def get_estilo_val(self):
+        try: return self.estilo.get()
+        except: return "animado"
+
     def setup_ui(self):
-        # Header Area
-        header = tk.Frame(self.root, bg=self.colors["bg"], pady=20)
+        # Header Area - Compacto
+        header = tk.Frame(self.root, bg=self.colors["bg"], pady=10)
         header.pack(fill="x")
-        tk.Label(header, text="SUBTITULADOR PRO", fg=self.colors["accent"], 
+        tk.Label(header, text="FASTCAPTIONS", fg=self.colors["accent"], 
                 bg=self.colors["bg"], font=("Segoe UI", 16, "bold")).pack()
-        tk.Label(header, text="Crea clips virales en segundos", fg=self.colors["text_dim"], 
-                bg=self.colors["bg"], font=("Segoe UI", 9)).pack()
+        tk.Label(header, text="Crea los subtitulos de tus videos en segundos", fg=self.colors["text_dim"], 
+                bg=self.colors["bg"], font=("Segoe UI", 8)).pack()
 
         # --- STEP 1: IMPORT & TRANSCRIPTION ---
-        s1_frame = tk.Frame(self.root, bg=self.colors["sidebar"], padx=20, pady=15)
-        s1_frame.pack(fill="x", padx=15, pady=5)
+        s1_frame = tk.Frame(self.root, bg=self.colors["sidebar"], padx=20, pady=10)
+        s1_frame.pack(fill="x", padx=15, pady=3)
         
         tk.Label(s1_frame, text="PASO 1: TRANSCRIPCIÓN", fg=self.colors["text"], 
                 bg=self.colors["sidebar"], font=("Segoe UI", 9, "bold")).pack(anchor="w")
@@ -109,26 +122,26 @@ class SubtituladorApp:
         self.btn_trans = tk.Button(s1_frame, text="📂 SELECCIONAR Y TRANSCRIBIR", 
                                    command=self.iniciar_transcripcion, 
                                    bg=self.colors["accent"], fg="#282a36", 
-                                   font=("Segoe UI", 9, "bold"), relief="flat", pady=8, cursor="hand2")
-        self.btn_trans.pack(fill="x", pady=(10, 5))
+                                   font=("Segoe UI", 9, "bold"), relief="flat", pady=6, cursor="hand2")
+        self.btn_trans.pack(fill="x", pady=(8, 4))
         
         self.progress1 = ttk.Progressbar(s1_frame, orient="horizontal", mode="determinate")
-        self.progress1.pack(fill="x", pady=5)
+        self.progress1.pack(fill="x", pady=2)
         self.status_trans = tk.Label(s1_frame, text="Esperando archivo...", 
                                     bg=self.colors["sidebar"], fg=self.colors["text_dim"], 
                                     font=("Segoe UI", 8, "italic"))
         self.status_trans.pack()
 
         # --- STEP 2: STYLING ---
-        s2_frame = tk.Frame(self.root, bg=self.colors["sidebar"], padx=20, pady=15)
-        s2_frame.pack(fill="x", padx=15, pady=5)
+        s2_frame = tk.Frame(self.root, bg=self.colors["sidebar"], padx=20, pady=10)
+        s2_frame.pack(fill="x", padx=15, pady=3)
         
         tk.Label(s2_frame, text="PASO 2: ESTILO Y AJUSTES", fg=self.colors["text"], 
                 bg=self.colors["sidebar"], font=("Segoe UI", 9, "bold")).pack(anchor="w")
 
         # Files quick look (simplified)
         f_files = tk.Frame(s2_frame, bg=self.colors["sidebar"])
-        f_files.pack(fill="x", pady=(10, 5))
+        f_files.pack(fill="x", pady=(8, 4))
         
         self.btn_vid_orig = tk.Button(f_files, text="🎥 VIDEO", command=self.set_video_orig, 
                                      bg="#334155", fg=self.colors["text"], relief="flat", 
@@ -142,17 +155,17 @@ class SubtituladorApp:
 
         # Color Pickers
         f_colors = tk.Frame(s2_frame, bg=self.colors["sidebar"])
-        f_colors.pack(fill="x", pady=10)
+        f_colors.pack(fill="x", pady=5)
  
         def create_color_picker(parent, label, attr_name):
             frame = tk.Frame(parent, bg=self.colors["sidebar"])
             frame.pack(side="left", expand=True)
             tk.Label(frame, text=label, font=("Segoe UI", 7, "bold"), 
                     fg=self.colors["text_dim"], bg=self.colors["sidebar"]).pack()
-            box = tk.Button(frame, width=4, height=1, bg=getattr(self, attr_name), 
+            box = tk.Button(frame, width=3, height=1, bg=getattr(self, attr_name), 
                             command=lambda: self.elegir_color(attr_name, box), relief="flat",
                             highlightthickness=1, highlightbackground="#334155")
-            box.pack(pady=2)
+            box.pack(pady=1)
             return box
  
         self.box_p = create_color_picker(f_colors, "TEXTO", "color_primario")
@@ -180,38 +193,45 @@ class SubtituladorApp:
 
         # Style Choice
         f_bottom = tk.Frame(s2_frame, bg=self.colors["sidebar"])
-        f_bottom.pack(fill="x", pady=(10, 0))
+        f_bottom.pack(fill="x", pady=(5, 0))
         
         tk.Radiobutton(f_bottom, text="Animado", variable=self.estilo, value="animado", 
-                      font=("Segoe UI", 9), bg=self.colors["sidebar"], fg=self.colors["text"],
+                      font=("Segoe UI", 8), bg=self.colors["sidebar"], fg=self.colors["text"],
                       selectcolor="#0f172a", activebackground=self.colors["sidebar"]).pack(side="left", padx=10)
         tk.Radiobutton(f_bottom, text="Estático", variable=self.estilo, value="estatico", 
-                      font=("Segoe UI", 9), bg=self.colors["sidebar"], fg=self.colors["text"],
+                      font=("Segoe UI", 8), bg=self.colors["sidebar"], fg=self.colors["text"],
                       selectcolor="#0f172a", activebackground=self.colors["sidebar"]).pack(side="left", padx=10)
 
         # --- STEP 3: PREVIEW & RENDER ---
-        s3_frame = tk.Frame(self.root, bg=self.colors["bg"], pady=10)
+        s3_frame = tk.Frame(self.root, bg=self.colors["bg"], pady=5)
         s3_frame.pack(fill="x", padx=15)
 
         self.progress2 = ttk.Progressbar(s3_frame, orient="horizontal", mode="determinate")
-        self.progress2.pack(fill="x", pady=(0, 10))
+        self.progress2.pack(fill="x", pady=(0, 2))
         
         self.status_render = tk.Label(s3_frame, text="Listo para renderizar", 
                                      bg=self.colors["bg"], fg=self.colors["text_dim"], 
-                                     font=("Segoe UI", 9, "italic"))
+                                     font=("Segoe UI", 8, "italic"))
         self.status_render.pack()
  
         self.btn_preview = tk.Button(self.root, text="🔍 PREVISUALIZAR Y EDITAR", 
                                      command=self.abrir_preview, 
                                      bg="#475569", fg="white", 
-                                     font=("Segoe UI", 10, "bold"), relief="flat", pady=10, cursor="hand2")
-        self.btn_preview.pack(fill="x", padx=30, pady=5)
+                                     font=("Segoe UI", 9, "bold"), relief="flat", pady=8, cursor="hand2")
+        self.btn_preview.pack(fill="x", padx=35, pady=3)
   
         self.btn_render = tk.Button(self.root, text="🚀 GENERAR VIDEO FINAL", 
                                     command=self.iniciar_render, 
                                     bg=self.colors["success"], fg="#0f172a", 
-                                    font=("Segoe UI", 12, "bold"), relief="flat", pady=12, cursor="hand2")
-        self.btn_render.pack(fill="x", padx=30, pady=(5, 20))
+                                    font=("Segoe UI", 11, "bold"), relief="flat", pady=10, cursor="hand2")
+        self.btn_render.pack(fill="x", padx=35, pady=3)
+
+        self.btn_reset = tk.Button(self.root, text="SUBTITULAR OTRO VIDEO", 
+                                    command=self.reset_app, 
+                                    bg="#1e293b", fg=self.colors["text_dim"], 
+                                    font=("Segoe UI", 9, "bold"), relief="flat", pady=8, cursor="hand2",
+                                    state="disabled")
+        self.btn_reset.pack(fill="x", padx=35, pady=(3, 10))
 
     def al_restaurar(self, event=None):
         if event and event.widget != self.root:
@@ -299,7 +319,15 @@ class SubtituladorApp:
     def proceso_transcripcion(self, video):
         try:
             self.status_trans.config(text="Cargando IA...", fg="orange")
-            model = WhisperModel("small", device="cpu", compute_type="int8")
+            
+            # Usar AppData para evitar errores de permisos en Program Files
+            appdata_dir = os.path.join(os.environ.get("LOCALAPPDATA", os.environ.get("APPDATA", ".")), "FastCaptions")
+            model_dir = os.path.join(appdata_dir, "models")
+            
+            if not os.path.exists(model_dir):
+                os.makedirs(model_dir, exist_ok=True)
+                
+            model = WhisperModel("small", device="cpu", compute_type="int8", download_root=model_dir)
             self.progress1["value"] = 50
             segments, _ = model.transcribe(video, word_timestamps=True)
             all_words = [w for s in segments for w in s.words]
@@ -314,7 +342,12 @@ class SubtituladorApp:
             self.status_trans.config(text="¡TXT Generado!", fg="green")
             self.path_txt_corr = txt_path
             self.root.after(0, lambda: self.btn_txt_corr.config(text="✅ TXT CARGADO", bg="#d1ffd1", fg="#0f172a"))
-            self.root.after(0, self.abrir_editor)
+            
+            # Autocargar video
+            self.path_vid_orig = video
+            self.root.after(0, lambda: self.btn_vid_orig.config(text="⏳ GENERANDO PROXY...", bg="#fff3cd", fg="#0f172a"))
+            threading.Thread(target=self.generar_proxy_async, daemon=True).start()
+            self.root.after(0, lambda: self.btn_reset.config(state="normal", fg="white", bg="#334155"))
         except Exception as e:
             messagebox.showerror("Error", str(e))
         finally:
@@ -334,11 +367,41 @@ class SubtituladorApp:
         crear_proxy_video(self.path_vid_orig, proxy_path)
         self.path_proxy = proxy_path
         self.root.after(0, lambda: self.btn_vid_orig.config(text="✅ VIDEO CON PROXY", bg="#d1ffd1", fg="#0f172a"))
+        self.root.after(0, lambda: self.btn_reset.config(state="normal", fg="white", bg="#334155"))
 
     def set_txt_corr(self):
         self.path_txt_corr = filedialog.askopenfilename(title="TXT corregido", filetypes=[("Texto", "*.txt")])
         if self.path_txt_corr: 
             self.btn_txt_corr.config(text="✅ TXT CARGADO", bg="#d1ffd1", fg="#0f172a")
+            self.btn_reset.config(state="normal", fg="white", bg="#334155")
+            
+    def reset_app(self):
+        self.path_vid_orig = ""
+        self.path_proxy = ""
+        self.path_txt_corr = ""
+        
+        # Reset buttons to original state
+        self.btn_vid_orig.config(text="🎥 VIDEO", bg="#334155", fg=self.colors["text"])
+        self.btn_txt_corr.config(text="📄 TXT", bg="#334155", fg=self.colors["text"])
+        self.btn_trans.config(state="normal", text="📂 SELECCIONAR Y TRANSCRIBIR", bg=self.colors["accent"])
+        
+        # Reset progress and status
+        self.progress1["value"] = 0
+        self.status_trans.config(text="Esperando archivo...", fg=self.colors["text_dim"])
+        
+        self.progress2["value"] = 0
+        self.status_render.config(text="Listo para renderizar", fg=self.colors["text_dim"])
+        
+        # Reset current render button if it was disabled
+        self.btn_render.config(state="normal")
+        
+        # Disable the reset button again
+        self.btn_reset.config(state="disabled", bg="#1e293b", fg=self.colors["text_dim"])
+        
+        # Close preview if open
+        if self.preview_active and hasattr(self.preview_active, 'p_root') and self.preview_active.p_root.winfo_exists():
+            self.preview_active.p_root.destroy()
+        self.preview_active = None
             
     def abrir_editor(self):
         if not self.path_txt_corr or not os.path.exists(self.path_txt_corr):
@@ -350,8 +413,7 @@ class SubtituladorApp:
                 with open(self.path_txt_corr, "r", encoding="utf-8") as f:
                     self.preview_active.lines = f.readlines()
                 self.preview_active.update_text_ui()
-                
-        SubtitleEditor(self.root, self.path_txt_corr, on_save_callback=al_guardar)
+
 
     def iniciar_render(self):
         if not self.path_vid_orig or not self.path_txt_corr:
@@ -366,85 +428,35 @@ class SubtituladorApp:
             total_duration = get_duration(self.path_vid_orig)
             ass_temp = os.path.join(os.path.dirname(self.path_vid_orig), "temp_render.ass")
             
-            # Colores en formato ASS
-            ass_white = rgb_to_ass(self.color_primario)
-            ass_yellow = rgb_to_ass(self.color_secundario)
-            ass_border = rgb_to_ass(self.color_borde)
+            # Usar el módulo de renderizado separado
+            renderer = SubtitleRenderer(
+                font_size=self.font_size.get(),
+                border_width=self.border_width.get(),
+                color_primary=self.color_primario,
+                color_secondary=self.color_secundario,
+                color_border=self.color_borde
+            )
             
-            header = f"[Script Info]\nPlayResX: 1080\nPlayResY: 1920\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Arial Black,{self.font_size.get()},{ass_white},{ass_white},{ass_border},&H00000000,1,0,0,0,100,100,0,0,1,{self.border_width.get()},0,8,10,10,{margin_v},1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
-            with open(self.path_txt_corr, "r", encoding="utf-8") as f:
-                lineas = f.readlines()
-            with open(ass_temp, "w", encoding="utf-8") as f:
-                f.write(header)
-                for linea in lineas:
-                    partes = linea.split("#")
-                    t_data = partes[1].strip().split("|")
-                    texto_completo = partes[2].strip()
-                    
-                    # Detectar altura específica
-                    dialog_margin = margin_v
-                    if "{{" in texto_completo:
-                        match = re.search(r"\{\{(\d+)\}\}", texto_completo)
-                        if match:
-                            dialog_margin = int(match.group(1))
-                            texto_completo = re.sub(r"\{\{\d+\}\}", "", texto_completo).strip()
-
-                    texto_corr = texto_completo.split(" ")
-                    start_g, end_g = partes[0].strip(), format_timestamp(float(t_data[-1].split(":")[1]))
-                    
-                    # Función para estimar el ancho en el render (PlayResX=1080)
-                    # Arial Black es ancha, estimamos ~0.6 del font_size por caracter
-                    f_size = self.font_size.get()
-                    def width_func_ass(t):
-                        return len(t) * f_size * 0.6
-                    
-                    texto_wrapped = wrap_text_pyramid(texto_completo, 1000, width_func_ass) # 1000 de margen de seguridad
-                    
-                    f.write(f"Dialogue: 0,{start_g},{end_g},Default,,0,0,{dialog_margin},,{texto_wrapped}\n")
-                    if self.estilo.get() == "animado":
-                        # Para el animado, el wrap complica el resalte de colores si no se maneja bien \N.
-                        # Por simplicidad, si hay \N, lo tratamos como espacio para el cálculo de palabras
-                        # pero al escribir el resalte, debemos mantener la estructura.
-                        # Una forma simple es usar el texto_wrapped y reemplazar la palabra actual.
-                        
-                        palabras_wrapped = texto_wrapped.replace("\\N", " ").split(" ")
-                        
-                        for idx, t_range in enumerate(t_data):
-                            if idx >= len(palabras_wrapped): break
-                            s_w, e_w = t_range.split(":"); w_start, w_end = format_timestamp(float(s_w)), format_timestamp(float(e_w))
-                            
-                            # Reconstruir el texto con el resalte
-                            # Buscamos la palabra i-ésima en el texto wrapped para cambiarle el color
-                            count = 0
-                            res_parts = []
-                            for p in texto_wrapped.split(" "):
-                                if "\\N" in p:
-                                    sub_p = p.split("\\N")
-                                    # Caso "palabra\\Npalabra"
-                                    new_sub = []
-                                    for sp in sub_p:
-                                        if count == idx:
-                                            new_sub.append(f"{{\\c{ass_yellow}}}{sp}{{\\c{ass_white}}}")
-                                        else:
-                                            new_sub.append(sp)
-                                        count += 1
-                                    res_parts.append("\\N".join(new_sub))
-                                else:
-                                    if count == idx:
-                                        res_parts.append(f"{{\\c{ass_yellow}}}{p}{{\\c{ass_white}}}")
-                                    else:
-                                        res_parts.append(p)
-                                    count += 1
-                            
-                            res = " ".join(res_parts)
-                            f.write(f"Dialogue: 1,{w_start},{w_end},Default,,0,0,{dialog_margin},,{{\\c{ass_white}}}{res}\n")
+            # Generar el archivo ASS
+            renderer.generate_ass_file(
+                txt_path=self.path_txt_corr,
+                ass_path=ass_temp,
+                global_margin=margin_v,
+                estilo=self.get_estilo_val()
+            )
 
             output = os.path.splitext(self.path_vid_orig)[0] + "_FINAL.mp4"
             ass_path_fixed = os.path.abspath(ass_temp).replace("\\", "/").replace(":", "\\:")
             ffmpeg = resource_path("ffmpeg.exe")
             
             cmd = [ffmpeg, '-i', self.path_vid_orig, '-vf', f"ass='{ass_path_fixed}'", '-c:v', 'libx264', '-crf', '18', '-c:a', 'copy', output, '-y', '-progress', 'pipe:1']
-            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+            
+            startupinfo = None
+            if os.name == 'nt':
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True, startupinfo=startupinfo)
             
             for line in process.stdout:
                 if "out_time=" in line:
